@@ -2,7 +2,7 @@ import yfinance as yf
 import pandas as pd
 import streamlit as st
 import numpy as np
-from investment-signal-tracker/trendline_equation import fit_trendline_from_lows
+from trendline_equation import fit_trendline_from_lows
 
 def convert_comma_number(val):
     if isinstance(val, str):
