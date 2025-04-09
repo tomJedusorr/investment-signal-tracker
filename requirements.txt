@@ -4,3 +4,4 @@ pandas
 numpy
 scipy
 plotly
+st-social-media-links
