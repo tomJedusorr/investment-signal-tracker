@@ -4,6 +4,7 @@ import streamlit as st
 import numpy as np
 from trendline_equation import fit_trendline_from_lows
 import plotly.express as px
+from st_social_media_links import SocialMediaIcons
 
 st.set_page_config(page_title="Investment Signal Tracker", page_icon="📈", layout="centered")
 
@@ -167,3 +168,17 @@ if st.button("Run Analysis"):
 
     else:
         st.warning("No data available.")
+
+social_media_links = [
+    "https://www.linkedin.com/in/rapha%C3%ABl-dahomay/",
+    "https://github.com/tomJedusorr"
+]
+
+social_media_icons = SocialMediaIcons(social_media_links)
+
+# Optional: Add a divider for visual separation
+st.divider()
+
+# Render the social media icons
+st.subheader("Follow the creator")
+social_media_icons.render()
