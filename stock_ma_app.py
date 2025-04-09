@@ -3,25 +3,35 @@ import pandas as pd
 import streamlit as st
 import numpy as np
 from trendline_equation import fit_trendline_from_lows
+import plotly.express as px
 
+st.set_page_config(page_title="Investment Signal Tracker", page_icon="📈", layout="centered")
+
+@st.cache_data(ttl=30, show_spinner=False)
 def convert_comma_number(val):
     if isinstance(val, str):
         return float(val.replace(",", "."))
     return val
 
-def calculate_mas(df, ma_periods, label_prefix):
+@st.cache_data(ttl=30, show_spinner=False)
+def fetch_ticker_info(ticker):
+    return yf.Ticker(ticker).info
+
+@st.cache_data(ttl=30, show_spinner=False)
+def calculate_mas(df, ticker, ma_periods, label_prefix):
     return {
-        f"MA{p}{label_prefix}": df.rolling(window=p).mean().iloc[-1]
+        f"MA{p}{label_prefix}": df[ticker].rolling(window=p).mean().iloc[-1]
         for p in ma_periods
     }
 
+@st.cache_data(ttl=30, show_spinner=False)
 def get_latest_mas(tickers, values, horizon):
     summary = []
     ma_periods=[100, 200]
 
     for ticker, value in zip(tickers, values):
         try:
-            df_full = yf.download(ticker)['Close']
+            df_full = (yf.download(ticker)['Close'])
         except Exception as e:
             print(f"Failed to download {ticker}: {e}")
             continue
@@ -31,40 +41,61 @@ def get_latest_mas(tickers, values, horizon):
             continue
 
         price_exp = fit_trendline_from_lows(ticker)
+        mkt_cap = fetch_ticker_info(ticker).get("marketCap")
+        latest_close = df_full[ticker].iloc[-1]
+        latest_peak = df_full[ticker].max()
+        spread = (latest_close / latest_peak) - 1
 
-        dff = yf.Ticker(ticker)
-        mkt_cap = dff.info.get("marketCap")
-
-        ma_values = {}
-
-        # Daily MAs
-        ma_values.update(calculate_mas(df_full[ticker], ma_periods, "daily"))
+        # Calculate daily features
+        ma_values = calculate_mas(df_full, ticker, ma_periods, "daily")
         daily_returns = df_full[ticker].pct_change()
         drawdown_d = daily_returns.min()
         std_dev_d = daily_returns.std()
         last_daily_return = daily_returns.iloc[-1]
-        geo_return_d = (np.prod([1 + r for r in daily_returns[1:]]) ** (1 / len(daily_returns))) - 1 
+        geo_return_d = (np.prod([1 + r for r in daily_returns[1:]]) ** (1 / len(daily_returns))) - 1
         adj_sharpe_d = geo_return_d / std_dev_d
 
+        # Trendline positioning
+        xma100d = (ma_values.get("MA100daily") - latest_close) / ma_values.get("MA100daily")
+        xma200d = (ma_values.get("MA200daily") - latest_close) / ma_values.get("MA200daily")
+        xtrenp2d = (price_exp.get("trend_p2") - latest_close) / price_exp.get("trend_p2")
+        xmkt_cap = (np.log(mkt_cap)) / 100 if mkt_cap else 0
+        xspread = -spread
+        xworstrd = drawdown_d - last_daily_return
+        xstd_devd = std_dev_d - last_daily_return
+
+        features = np.array([xma100d, xma200d, xtrenp2d, adj_sharpe_d, xmkt_cap, xspread, xworstrd, xstd_devd])
+        weights = np.array([0.05, 0.05, 0.1, 0.1, 0.1, 0.05, 0.1, 0.45])
+        daily_y = np.sum(weights * features) * value
+
+        # Similar pattern for weekly, monthly, yearly
         # Weekly
         weekly = df_full.resample('W', label='left').last()
         weekly_returns = weekly[ticker].pct_change()
-        ma_values.update(calculate_mas(weekly[ticker], ma_periods, "weekly"))
         std_dev_w = weekly_returns.std()
         last_weekly_return = df_full[ticker].iloc[-1] / df_full[ticker].iloc[-6] - 1
         drawdown_w = weekly_returns.min()
         geo_return_w = (np.prod([1 + r for r in weekly_returns[1:]]) ** (1 / len(weekly_returns))) - 1 
         adj_sharpe_w = geo_return_w / std_dev_w
+        xworstrw = drawdown_w - last_weekly_return
+        xstd_devw = std_dev_w - last_weekly_return
+        weekly_features = np.array([xma100d, xma200d, xtrenp2d, adj_sharpe_w, xmkt_cap, xspread, xworstrw, xstd_devw])
+        weekly_y = np.sum(weights * weekly_features) * value
 
         # Monthly
         monthly = df_full.resample('M', label='left').last()
         monthly_returns = monthly[ticker].pct_change()
-        ma_values.update(calculate_mas(monthly[ticker], ma_periods, "monthly"))
         std_dev_m = monthly_returns.std()
         last_monthly_return = df_full[ticker].iloc[-1] / df_full[ticker].iloc[-22] - 1
         drawdown_m = monthly_returns.min()
         geo_return_m = (np.prod([1 + r for r in monthly_returns[1:]]) ** (1 / len(monthly_returns))) - 1 
         adj_sharpe_m = geo_return_m / std_dev_m
+        xma100m = (calculate_mas(monthly, ticker, ma_periods, "weekly").get("MA100weekly") - latest_close) / calculate_mas(monthly, ticker, ma_periods, "weekly").get("MA100weekly")
+        xma200m = (calculate_mas(monthly, ticker, ma_periods, "weekly").get("MA200weekly") - latest_close) / calculate_mas(monthly, ticker, ma_periods, "weekly").get("MA200weekly")
+        xworstrm = drawdown_m - last_monthly_return
+        xstd_devm = std_dev_m - last_monthly_return
+        monthly_features = np.array([xma100m, xma200m, xtrenp2d, adj_sharpe_m, xmkt_cap, xspread, xworstrm, xstd_devm])
+        monthly_y = np.sum(weights * monthly_features) * value
 
         # Yearly
         yearly = df_full.resample('Y', label='left').last()
@@ -74,135 +105,65 @@ def get_latest_mas(tickers, values, horizon):
         drawdown_y = yearly_returns.min()
         geo_return_y = (np.prod([1 + r for r in yearly_returns[1:]]) ** (1 / len(yearly_returns))) - 1 
         adj_sharpe_y = geo_return_y / std_dev_y
-
-        latest_close = df_full[ticker].iloc[-1]
-        latest_peak = df_full[ticker].max()
-        spread = (latest_close / latest_peak) - 1
-
-        # Sizing Formula
-        wma100 = 0.05
-        wma200 = 0.05
-        wtrenp3 = 0.1
-        wsharpe = 0.1
-        wmkt_cap = 0.1
-        wspread = 0.05
-        wworstr = 0.1
-        wstd_dev = 0.45
-
-        weights = np.array([wma100, wma200, wtrenp3, wsharpe, wmkt_cap, wspread, wworstr, wstd_dev])
-
-        # Daily parameters
-        xma100d = ((ma_values.get("MA100daily")) - latest_close) / ma_values.get("MA100daily")
-        xma200d = ((ma_values.get("MA200daily")) - latest_close) / ma_values.get("MA200daily")
-        xtrenp3d = ((price_exp.get("trend_p2")) - latest_close) / (price_exp.get("trend_p2"))
-        xsharped = adj_sharpe_d
-        xmkt_cap = (np.log(mkt_cap)) / 100
-        xspread = spread * (-1)
-        xworstrd = drawdown_d - last_daily_return
-        xstd_devd = std_dev_d - last_daily_return
-
-        daily_p = np.array([xma100d, xma200d, xtrenp3d, xsharped, xmkt_cap, xspread, xworstrd, xstd_devd])
-
-        daily_y = (np.sum(weights * daily_p)) * value
-
-        # Weekly parameters
-        xsharpew = adj_sharpe_w
-        xworstrw = drawdown_w - last_weekly_return
-        xstd_devw = std_dev_w - last_weekly_return
-
-        weekly_p = np.array([xma100d, xma200d, xtrenp3d, xsharpew, xmkt_cap, xspread, xworstrw, xstd_devw])
-
-        weekly_y = (np.sum(weights * weekly_p)) * value
-
-        # Monthly parameters
-        xma100m = ((ma_values.get("MA100weekly")) - latest_close) / ma_values.get("MA100weekly")
-        xma200m = ((ma_values.get("MA200weekly")) - latest_close) / ma_values.get("MA200weekly")
-        xsharpem = adj_sharpe_m
-        xworstrm = drawdown_m - last_monthly_return
-        xstd_devm = std_dev_m - last_monthly_return
-
-        monthly_p = np.array([xma100d, xma200d, xtrenp3d, xsharpem, xmkt_cap, xspread, xworstrm, xstd_devm])
-
-        monthly_y = (np.sum(weights * monthly_p)) * value
-
-        # Yearly parameters
-        xtrenp2y = ((price_exp.get("trend_p2")) - latest_close) / (price_exp.get("trend_p2"))
-        xsharpey = adj_sharpe_y
         xworstry = drawdown_y - last_yearly_return
         xstd_devy = std_dev_y - last_yearly_return
-
-        yearly_p = np.array([xma100m, xma200m, xtrenp3d, xsharpey, xmkt_cap, xspread, xworstry, xstd_devy])
-
-        yearly_y = (np.sum(weights * yearly_p)) * value
-
-        sharpes = {"Adj Sharpe Daily": adj_sharpe_d,
-                   "Adj Sharpe Weekly": adj_sharpe_w,
-                   "Adj Sharpe Monthly": adj_sharpe_m,
-                   "Adj Sharpe Yearly": adj_sharpe_y}
+        yearly_features = np.array([xma100m, xma200m, xtrenp2d, adj_sharpe_y, xmkt_cap, xspread, xworstry, xstd_devy])
+        yearly_y = np.sum(weights * yearly_features) * value
 
         summary.append({
             "Ticker": ticker,
-            "Latest Close": latest_close,
             "Daily Investment": daily_y,
             "Weekly Investment": weekly_y,
             "Monthly Investment": monthly_y,
-            "Yearly Investment": yearly_y,
-            **price_exp,
-            **ma_values,
-            **sharpes,
-            "Spread from Peak": spread,
-            "Std Dev Daily": std_dev_d,
-            "Std Dev Weekly": std_dev_w,
-            "Std Dev Monthly": std_dev_m,
-            "Std Dev Yearly": std_dev_y,
-            "Last Daily Return": last_daily_return,
-            "Last Weekly Return": last_weekly_return,
-            "Last Monthly Return": last_monthly_return,
-            "Last Yearly Return": last_yearly_return,
-            "Worst Daily Return": drawdown_d,
-            "Worst Weekly Return": drawdown_w,
-            "Worst Monthly Return": drawdown_m,
-            "Worst yearly Return": drawdown_y,
-            "Last Market Cap": mkt_cap
+            "Yearly Investment": yearly_y
         })
 
-        Table = pd.DataFrame(summary)
+    df = pd.DataFrame(summary)
+    return df[['Ticker', f"{horizon.title()} Investment"]]
 
-    if horizon == "daily":
-        return Table[['Ticker', 'Daily Investment']]
-    elif horizon == "weekly":
-        return Table[['Ticker', 'Weekly Investment']]
-    elif horizon == "monthly":
-        return Table[['Ticker', 'Monthly Investment']]
-    else:
-        return Table[['Ticker', 'Yearly Investment']]
+# ------------------ UI ------------------
 
-st.title("📈 technical Analysis Dashboard")
+st.title("📈 Investment Sizing Dashboard")
 
-tickers_input = st.text_input("Enter stock tickers (semi-colon-separated)")
-price_input = st.text_input("Enter your position value (semi-colon-separated)")
+tickers_input = st.text_input("Enter tickers (semicolon-separated)")
+prices_input = st.text_input("Enter position values (semicolon-separated, comma for decimals)")
+horizon = st.selectbox("Select horizon", ["daily", "weekly", "monthly", "yearly"])
 
-period = st.selectbox("Select Horizon", ["daily", "weekly", "monthly", "yearly"], index=0)
-
-# Convert user input
 tickers = [t.strip().upper() for t in tickers_input.split(";") if t.strip()]
-values = [convert_comma_number(p.strip()) for p in price_input.split(";") if p.strip()]
-horizon = period
+values = [convert_comma_number(v.strip()) for v in prices_input.split(";") if v.strip()]
 
 if st.button("Run Analysis"):
-    if tickers and values and horizon:
-        with st.spinner("Fetching data..."):
-            df_result = get_latest_mas(tickers, values, horizon)
-        st.success("Done!")
+    if len(tickers) != len(values):
+        st.error("Mismatch between number of tickers and values.")
+        st.stop()
 
-        if not df_result.empty:
+    with st.spinner("Running analysis..."):
+        df_result = get_latest_mas(tickers, values, horizon)
+
+    if not df_result.empty:
+        invest_col = df_result.columns[1]
+        df_result[invest_col] = df_result[invest_col].astype(float).round(2)
+
+        st.markdown(f"### 📊 {invest_col} per Ticker")
+
+        fig = px.bar(
+            df_result,
+            x="Ticker",
+            y=invest_col,
+            text=invest_col,
+            title=f"Suggested {invest_col}",
+            color=invest_col,
+            color_continuous_scale="Blues"
+        )
+        fig.update_traces(texttemplate='%{text:.2f}', textposition='outside')
+        fig.update_layout(yaxis_title="Amount", xaxis_title="Ticker", height=700)
+        st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("🔍 View Full Table"):
             st.dataframe(df_result)
 
-            # Download as CSV
-            csv = df_result.to_csv(index=False).encode('utf-8')
-            st.download_button("Download CSV", csv, "moving_averages.csv", "text/csv")
+        csv = df_result.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Download CSV", csv, "investment_suggestions.csv", "text/csv")
 
-        else:
-            st.warning("No data to display.")
     else:
-        st.error("Please enter valid tickers and MA periods.")
+        st.warning("No data available.")
