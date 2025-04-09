@@ -3,7 +3,9 @@ import pandas as pd
 import numpy as np
 from scipy.signal import argrelextrema
 from datetime import date
+import streamlit as st
 
+@st.cache_data(ttl=30, show_spinner=False)
 def fit_trendline_from_lows(ticker):
     """
     Fits a linear trendline through the lowest local lows of a stock's closing prices.
