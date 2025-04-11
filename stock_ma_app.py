@@ -66,7 +66,7 @@ def get_latest_mas(tickers, values, horizon):
         xstd_devd = std_dev_d - last_daily_return
 
         features = np.array([xma100d, xma200d, xtrenp2d, adj_sharpe_d, xmkt_cap, xspread, xworstrd, xstd_devd])
-        weights = np.array([0.05, 0.05, 0.1, 0.1, 0.1, 0.05, 0.1, 0.45])
+        weights = np.array([0.05, 0.05, 0.1, 0.05, 0.05, 0.05, 0.05, 0.6])
         daily_y = np.sum(weights * features) * value
 
         # Similar pattern for weekly, monthly, yearly
