@@ -124,7 +124,7 @@ def get_latest_mas(tickers, values, horizon):
 
 # ------------------ UI ------------------
 
-st.title("📈 Investment Sizing Dashboard")
+st.title("Investment Sizing Dashboard")
 
 tickers_input = st.text_input("Enter tickers (semicolon-separated)")
 prices_input = st.text_input("Enter position values (semicolon-separated, comma for decimals)")
@@ -145,7 +145,7 @@ if st.button("Run Analysis"):
         invest_col = df_result.columns[1]
         df_result[invest_col] = df_result[invest_col].astype(float).round(2)
 
-        st.markdown(f"### 📊 {invest_col} per Ticker")
+        st.markdown(f"### {invest_col} per Ticker")
 
         fig = px.bar(
             df_result,
