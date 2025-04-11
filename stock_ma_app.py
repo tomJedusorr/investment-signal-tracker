@@ -32,7 +32,7 @@ def get_latest_mas(tickers, values, horizon):
 
     for ticker, value in zip(tickers, values):
         try:
-            df_full = (yf.download(ticker)['Close'])
+            df_full = (yf.download(ticker, start="2000-1-1")['Close'])
         except Exception as e:
             print(f"Failed to download {ticker}: {e}")
             continue
@@ -84,7 +84,7 @@ def get_latest_mas(tickers, values, horizon):
         weekly_y = np.sum(weights * weekly_features) * value
 
         # Monthly
-        monthly = df_full.resample('M', label='left').last()
+        monthly = df_full.resample('ME', label='left').last()
         monthly_returns = monthly[ticker].pct_change()
         std_dev_m = monthly_returns.std()
         last_monthly_return = df_full[ticker].iloc[-1] / df_full[ticker].iloc[-22] - 1
@@ -99,7 +99,7 @@ def get_latest_mas(tickers, values, horizon):
         monthly_y = np.sum(weights * monthly_features) * value
 
         # Yearly
-        yearly = df_full.resample('Y', label='left').last()
+        yearly = df_full.resample('YE', label='left').last()
         yearly_returns = yearly[ticker].pct_change()
         std_dev_y = std_dev_d * np.sqrt(252)
         last_yearly_return = df_full[ticker].iloc[-1] / df_full[ticker].iloc[-253] - 1
